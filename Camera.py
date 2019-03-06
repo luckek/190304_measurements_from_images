@@ -7,11 +7,14 @@ class OutOfSensorBoundsError(Exception):
 
 
 class Camera(object):
-    def __init__(self):
+
+    def __init__(self, f_length, sensor_size):
+
         self.p = None  # Pose
         self.p0 = None
-        self.f = None  # Focal Length in Pixels
-        self.sensor_size = (None, None)
+        self.f = f_length  # Focal Length in Pixels
+        self.sensor_size = sensor_size
+
         # Throw error if projected coord is out of sensor bounds
         self.error_on_oob = False
 
@@ -107,13 +110,13 @@ class Camera(object):
 
         return C @ X
 
-    def estimate_pose(self, X_gcp, u_gcp):
+    def estimate_pose(self, X_gcp, u_gcp, p0):
         """
         This function adjusts the pose vector such that the difference between the observed pixel coordinates u_gcp
         and the projected pixels coordinates of X_gcp is minimized.
         """
 
-        self.p = self.p0.copy()
+        self.p = p0.copy()
 
         def residuals(p, X_gcp, u_gcp):
             self.p = p.copy()
@@ -147,4 +150,12 @@ def read_gcp(fname):
             ele.append(float(vals[4].strip()))
     uv = np.vstack((u, v))
     ene = np.vstack((east, north, ele))
+    return uv, ene
+
+
+def read_gcp_nh(gcp_fname):
+
+    uv_ene = np.loadtxt(gcp_fname, delimiter=',')
+    uv, ene = uv_ene[:, 0:2], uv_ene[:, 2:]
+
     return uv, ene
