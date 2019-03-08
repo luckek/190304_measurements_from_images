@@ -1,4 +1,5 @@
 from Camera import *
+from InverseCamera import *
 import matplotlib.pyplot as plt
 import sys
 from PIL import Image, ExifTags
@@ -33,7 +34,7 @@ def plot_fit(uv, puv, img):
     plt.show()
 
 
-def parse_cmds(argv):
+def parse_args(argv):
 
     img_files = []
     gcp_files = []
@@ -53,10 +54,53 @@ def make_p0(ene):
     ene0[0] -= 1000
 
     p0 = ene0
+
     # Assume looking straight East
     p0.extend([90, 0, 0])
 
     return p0
+
+
+def read_gcp_nh(gcp_fname):
+
+    uv_ene = np.loadtxt(gcp_fname, delimiter=',')
+    uv, ene = uv_ene[:, 0:2], uv_ene[:, 2:]
+
+    return uv, ene
+
+
+def get_calibrated_cameras(img_files, gcp_files, f_length, sensor_size, check_calibration=False):
+
+    cam_list = []
+    for img_fname, gcp_fname in zip(img_files, gcp_files):
+
+        # Setup camera model.
+        # Presumably, this is the same
+        # for all pictures.
+        cam = Camera(f_length, sensor_size)
+
+        # Read in image and ground control points
+        img = plt.imread(img_fname)
+        uv, ene = read_gcp_nh(gcp_fname)
+
+        # Make initial pose guess
+        p0 = make_p0(ene.T)
+
+        # Estimate pose
+        cam.estimate_pose(ene.T, uv.T, p0)
+        print("Estimated pose:", cam.p.tolist())
+
+        cam_list.append(cam)
+
+        if check_calibration:
+
+            # Visually test the fit
+            puv = cam.ene_to_camera(ene.T)
+            plot_fit(uv, puv, img)
+
+            print("SSE:", sum_sq_error(uv, puv.T), '\n')
+
+    return cam_list
 
 
 def main(argv):
@@ -79,30 +123,28 @@ def main(argv):
     print("focal length:", f_length)
     print("sensor size:", sensor_size, '\n')
 
-    # Setup camera model.
-    # Presumably, this is the same
-    # for all pictures.
-    cam = Camera(f_length, sensor_size)
+    img_files, gcp_files = parse_args(argv)
+    cam_list = get_calibrated_cameras(img_files, gcp_files, f_length, sensor_size)
 
-    img_files, gcp_files = parse_cmds(argv)
-    for img_fname, gcp_fname in zip(img_files, gcp_files):
+    # Read in clock tower GCP
+    uv, ene = read_gcp_nh('main_hall_clock.txt')
 
-        # Read in image and ground control points
-        img = plt.imread(img_fname)
-        uv, ene = read_gcp_nh(gcp_fname)
+    i_cam = InverseCamera()
 
-        # Make initial pose guess
-        p0 = make_p0(ene.T)
+    X0 = np.zeros((3))
 
-        # Estimate pose
-        cam.estimate_pose(ene.T, uv.T, p0)
-        print("Estimated pose:", cam.p.tolist())
+    # Use the average position of the cameras to compute initial guess
+    for cam in cam_list:
+        X0 += cam.p[:3]
 
-        # Visually test the fit
-        puv = cam.ene_to_camera(ene.T)
-        plot_fit(uv, puv, img)
+    X0 /= len(cam_list)
 
-        print("SSE:", sum_sq_error(uv, puv.T), '\n')
+    i_cam.estimate_points(cam_list, uv.T, X0)
+
+    print('\nEstimated ene:', i_cam.x_pt)
+    print('Actual ene:', ene[0])
+    print('\nabs difference:', np.abs(i_cam.x_pt - ene[0]))
+    print('sse:', sum_sq_error(i_cam.x_pt, ene[0]))
 
 
 if __name__ == '__main__':
